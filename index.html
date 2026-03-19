@@ -150,7 +150,7 @@
         graphMode: document.getElementById('graphMode')
     };
 
-    // --- Math Functions ---
+    // --- Math & Vector Functions ---
     function j1(x) {
         let ax = Math.abs(x), y, ans1, ans2;
         if (ax < 8.0) {
@@ -195,6 +195,31 @@
         return 20 * Math.log10(Math.abs(gainFactor));
     }
 
+    // NEW: Converts erratic Euler angles into stable 3D vectors
+    function getStableAngles(alpha, beta, gamma) {
+        const d2r = Math.PI / 180;
+        const r2d = 180 / Math.PI;
+
+        const a = (alpha || 0) * d2r;
+        const b = (beta || 0) * d2r;
+        const g = (gamma || 0) * d2r;
+
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const cb = Math.cos(b), sb = Math.sin(b);
+        const cg = Math.cos(g), sg = Math.sin(g);
+
+        // Project the device's back camera into Earth's 3D coordinate space
+        const vx = -(ca * sg + sa * sb * cg); // East/West
+        const vy = -(sa * sg - ca * sb * cg); // North/South
+        const vz = -(cb * cg);                // Up/Down
+
+        // Extract stable Azimuth and Elevation from the 3D vector
+        let el = Math.asin(Math.max(-1, Math.min(1, vz))) * r2d;
+        let az = Math.atan2(vx, vy) * r2d;
+
+        return { az: (az + 360) % 360, el: el };
+    }
+
     function clearGraphHistory() {
         historyAz = [];
         historyEl = [];
@@ -211,9 +236,7 @@
 
     // --- Chart Logic ---
     function initChart() {
-        if (rslChart) {
-            rslChart.destroy();
-        }
+        if (rslChart) rslChart.destroy();
 
         const ctx = document.getElementById('rslChart').getContext('2d');
         rslChart = new Chart(ctx, {
@@ -246,8 +269,8 @@
                     x: { 
                         type: 'linear', 
                         title: { display: true, text: 'Angle (°)' },
-                        min: 80,  // FIX: Hardcoded minimum bound
-                        max: 100  // FIX: Hardcoded maximum bound
+                        min: 80,  // Locked Minimum
+                        max: 100  // Locked Maximum
                     },
                     y: { 
                         title: { display: true, text: 'RSL (dBm)' }, 
@@ -271,14 +294,12 @@
     function updateDashboard() {
         if (!state.sensorsActive) return;
 
-        // FIX: Ensure Elevation is smoothly wrapped between 0-360 just like Azimuth
         state.calibrated.az = normalizeAz(state.raw.az + state.offsets.az);
         state.calibrated.el = normalizeAz(state.raw.el + state.offsets.el);
 
         els.outYaw.textContent = state.calibrated.az.toFixed(1);
         els.outPitch.textContent = state.calibrated.el.toFixed(1);
 
-        // FIX: Safely calculate the shortest distance for Elevation without breaking limits
         let dAz = angularDist(state.calibrated.az, state.targetAz);
         let dEl = angularDist(state.calibrated.el, state.targetEl);
         let theta2D = Math.sqrt(dAz*dAz + dEl*dEl); 
@@ -299,11 +320,14 @@
             let currentX = mode === 'azimuth' ? state.calibrated.az : state.calibrated.el;
             let currentY = Math.max(rsl, -100);
 
-            historyAz.push({ x: state.calibrated.az, y: currentY });
-            historyEl.push({ x: state.calibrated.el, y: currentY });
+            // Only plot points that fall within the 80 to 100 chart boundaries
+            if (currentX >= 80 && currentX <= 100) {
+                historyAz.push({ x: state.calibrated.az, y: currentY });
+                historyEl.push({ x: state.calibrated.el, y: currentY });
 
-            if (historyAz.length > MAX_HISTORY) historyAz.shift();
-            if (historyEl.length > MAX_HISTORY) historyEl.shift();
+                if (historyAz.length > MAX_HISTORY) historyAz.shift();
+                if (historyEl.length > MAX_HISTORY) historyEl.shift();
+            }
 
             rslChart.data.datasets[1].data = [{ x: currentX, y: currentY }];
             rslChart.update();
@@ -312,9 +336,10 @@
     }
 
     function handleOrientation(event) {
-        let isLandscape = window.innerWidth > window.innerHeight;
-        state.raw.az = event.alpha || 0;
-        state.raw.el = isLandscape ? (event.gamma || 0) : (event.beta || 0);
+        // Feed raw, erratic data into the vector stabilizer
+        const stable = getStableAngles(event.alpha, event.beta, event.gamma);
+        state.raw.az = stable.az;
+        state.raw.el = stable.el;
         updateDashboard();
     }
 
@@ -355,7 +380,6 @@
     });
 
     els.btnZero.addEventListener('click', () => {
-        // FIX: Apply the same normalization to the elevation offset
         state.offsets.az = normalizeAz(90.0 - state.raw.az);
         state.offsets.el = normalizeAz(90.0 - state.raw.el);
         clearGraphHistory();
