@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>RF Antenna Alignment Emulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary: #007bff;
@@ -13,100 +14,38 @@
             --bg: #f8f9fa;
             --text: #333;
         }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            margin: 0;
-            padding: 15px;
-            background-color: var(--bg);
-            color: var(--text);
-            user-select: none; /* Prevent text selection while interacting */
+            margin: 0; padding: 15px; background-color: var(--bg); color: var(--text); user-select: none;
         }
-
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
+        .container { max-width: 800px; margin: 0 auto; }
         h1 { text-align: center; color: var(--primary); font-size: 1.5rem; }
-
-        /* Setup/Configuration Area */
-        .config-panel {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-
+        
+        .panel { background: white; padding: 15px; border-radius: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .input-group { margin-bottom: 10px; }
         label { display: block; margin-bottom: 4px; font-weight: bold; font-size: 0.9rem;}
-        input[type="number"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            box-sizing: border-box; /* Crucial for padding */
-        }
-
-        button {
-            width: 100%;
-            padding: 12px;
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 1rem;
-            font-weight: bold;
-            cursor: pointer;
-            margin-bottom: 10px;
-            transition: background 0.2s;
-        }
+        input[type="number"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        
+        button { width: 100%; padding: 12px; border: none; border-radius: 5px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white;}
+        button.primary { background-color: var(--primary); }
+        button.success { background-color: var(--success); }
+        button.dark { background-color: #333; }
+        button.danger { background-color: var(--danger); }
         button:active { opacity: 0.8; }
-        
-        button#btnZero { background-color: #333; }
-        button#btnPermissions { background-color: var(--success); }
 
-        /* Dashboard/Display Area */
-        .dashboard {
-            display: none; /* Hidden until permissions granted */
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-
-        .metric-card {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-
+        .dashboard { display: none; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .metric-card { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
         .metric-card h3 { margin: 0 0 10px 0; font-size: 0.9rem; color: #666; text-transform: uppercase;}
+        .metric-value { font-size: 1.5rem; font-weight: bold; }
         
-        .metric-value { font-size: 1.8rem; font-weight: bold; }
-        .metric-unit { font-size: 0.9rem; color: #666; }
-
-        /* Big RSL Display */
-        .rsl-card {
-            grid-column: 1 / -1; /* Span both columns */
-            background-color: #333;
-            color: white;
-        }
+        .rsl-card { grid-column: 1 / -1; background-color: #333; color: white; }
         .rsl-card h3 { color: #aaa; }
         .rsl-value { font-size: 3rem; color: var(--success); }
-        .rsl-delta { font-size: 1rem; color: #aaa; margin-top: 5px;}
-
-        /* Error/Status Bar */
-        #statusMessage {
-            text-align: center;
-            padding: 10px;
-            background: #ffeeba;
-            color: #856404;
-            border-radius: 5px;
-            margin-top: 15px;
-            display: none;
-        }
+        
+        .full-width { grid-column: 1 / -1; }
+        .btn-group { display: flex; gap: 10px; }
+        
+        .chart-container { position: relative; height: 30vh; width: 100%; margin-top: 15px;}
     </style>
 </head>
 <body>
@@ -114,9 +53,7 @@
 <div class="container">
     <h1>📡 RF Alignment Emulator</h1>
 
-    <div id="statusMessage">Checking HTTPS connection...</div>
-
-    <div class="config-panel" id="setupPanel">
+    <div class="panel" id="setupPanel">
         <div class="input-group">
             <label>Frequency (GHz):</label>
             <input type="number" id="inFreq" value="11.0" step="0.1" min="1">
@@ -125,290 +62,293 @@
             <label>Antenna Diameter (Feet):</label>
             <input type="number" id="inDiameter" value="4.0" step="0.5" min="0.5">
         </div>
-        
-        <button id="btnPermissions">Step 1: Start Sensors</button>
-        <button id="btnRandomizeTarget" style="display:none; background:#666;">Step 2: Set New Target Angle</button>
+        <button class="success" id="btnPermissions">Start Sensors</button>
+        <button class="primary" id="btnRandomizeTarget" style="display:none;">Set New Targets (Az & El)</button>
     </div>
 
     <div class="dashboard" id="mainDashboard">
         
         <div class="metric-card rsl-card">
             <h3>Emulated RSL</h3>
-            <div class="rsl-value"><span id="outRsl">--</span> <span class="metric-unit">dBm</span></div>
-            <div class="rsl-delta">Attenuation: <span id="outAtten">--</span> dB</div>
+            <div class="rsl-value"><span id="outRsl">--</span> dBm</div>
+            <div>Attenuation: <span id="outAtten">--</span> dB</div>
         </div>
 
-        <div class="metric-card" style="grid-column: 1 / -1;">
-            <h3>Target Optimal Angle</h3>
-            <div class="metric-value" style="color: var(--primary);"><span id="outTarget">--</span>°</div>
+        <div class="metric-card full-width">
+            <h3>Targets</h3>
+            <div class="metric-value" style="color: var(--primary);">
+                Azimuth: <span id="outTargetAz">--</span>° | Elev: <span id="outTargetEl">--</span>°
+            </div>
         </div>
 
         <div class="metric-card">
-            <h3>Yaw (Azimuth)</h3>
+            <h3>Azimuth (Yaw)</h3>
             <div class="metric-value"><span id="outYaw">--</span>°</div>
         </div>
-        
         <div class="metric-card">
-            <h3>Pitch</h3>
+            <h3>Elevation (Pitch)</h3>
             <div class="metric-value"><span id="outPitch">--</span>°</div>
         </div>
 
-        <div class="metric-card" style="grid-column: 1 / -1;">
-            <button id="btnZero">🎯 ZERO GYRO (Set to 90°)</button>
+        <div class="full-width btn-group">
+            <button class="dark" id="btnZero">🎯 ZERO GYRO</button>
+            <button class="danger" id="btnStop">⏹ STOP</button>
         </div>
 
-        <div class="metric-card" style="grid-column: 1 / -1;">
-            <h3>GPS Location</h3>
-            <div class="metric-unit"><span id="outGps">Waiting for fix...</span></div>
+        <div class="panel full-width">
+            <div class="input-group">
+                <label>Graph View:</label>
+                <select id="graphMode">
+                    <option value="azimuth">RSL vs Azimuth</option>
+                    <option value="elevation">RSL vs Elevation</option>
+                </select>
+            </div>
+            <div class="chart-container">
+                <canvas id="rslChart"></canvas>
+            </div>
         </div>
         
     </div>
 </div>
 
 <script>
-    // --- Application State ---
+    const BASE_RSL = -30.0; 
+    let rslChart = null;
+    let lastChartUpdate = 0;
+
+    // History arrays for the sweep trace
+    let historyAz = [];
+    let historyEl = [];
+    const MAX_HISTORY = 200; // Limit points to prevent iPad lag
+
     let state = {
         sensorsActive: false,
-        targetAngle: 0,
-        // Raw values from hardware
-        raw: { alpha: 0, beta: 0, gamma: 0 },
-        // Zeroing offsets
-        offsets: { alpha: 0, beta: 0, gamma: 0 },
-        // Calibrated values shown to user
-        calibrated: { alpha: 0, beta: 0, gamma: 0 }
+        targetAz: 0,
+        targetEl: 0,
+        raw: { az: 0, el: 0 },
+        offsets: { az: 0, el: 0 },
+        calibrated: { az: 0, el: 0 },
+        currentAtten: 0
     };
 
-    // Constant: Perfect Line-of-Sight RSL
-    const BASE_RSL = -30.0; 
-
-    // --- DOM Elements ---
     const els = {
         inFreq: document.getElementById('inFreq'),
         inDiameter: document.getElementById('inDiameter'),
         btnPermissions: document.getElementById('btnPermissions'),
         btnRandomizeTarget: document.getElementById('btnRandomizeTarget'),
         btnZero: document.getElementById('btnZero'),
-        setupPanel: document.getElementById('setupPanel'),
+        btnStop: document.getElementById('btnStop'),
         dashboard: document.getElementById('mainDashboard'),
         outRsl: document.getElementById('outRsl'),
         outAtten: document.getElementById('outAtten'),
-        outTarget: document.getElementById('outTarget'),
+        outTargetAz: document.getElementById('outTargetAz'),
+        outTargetEl: document.getElementById('outTargetEl'),
         outYaw: document.getElementById('outYaw'),
         outPitch: document.getElementById('outPitch'),
-        outGps: document.getElementById('outGps'),
-        status: document.getElementById('statusMessage')
+        graphMode: document.getElementById('graphMode')
     };
 
-    // --- Core Mathematical Engine ---
-
-    /**
-     * Approximation of Bessel function of the first kind, order 1, J1(x).
-     * Standard polynomial approximation used in scientific computation.
-     */
+    // --- Math Functions ---
     function j1(x) {
-        let ax, z;
-        let xx, y, ans, ans1, ans2;
-        
-        if ((ax = Math.abs(x)) < 8.0) {
+        let ax = Math.abs(x), y, ans1, ans2;
+        if (ax < 8.0) {
             y = x * x;
-            ans1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1
-                + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))));
-            ans2 = 144725228464.0 + y * (2300535178.0 + y * (18583304.74
-                + y * (99447.43394 + y * (376.9996644 + y * 1.0))));
+            ans1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1 + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))));
+            ans2 = 144725228464.0 + y * (2300535178.0 + y * (18583304.74 + y * (99447.43394 + y * (376.9996644 + y * 1.0))));
             return ans1 / ans2;
         } else {
-            z = 8.0 / ax;
-            y = z * z;
-            xx = ax - 2.356194491; // 3*PI/4
-            ans1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396491e-4
-                + y * (0.2457520174e-5 + y * (-0.240337019e-6))));
-            ans2 = 0.04687499995 + y * (-0.2002690873e-3
-                + y * (0.8449199096e-5 + y * (-0.88228987e-6
-                + y * (0.105787412e-6))));
+            let z = 8.0 / ax; y = z * z; let xx = ax - 2.356194491;
+            ans1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396491e-4 + y * (0.2457520174e-5 + y * (-0.240337019e-6))));
+            ans2 = 0.04687499995 + y * (-0.2002690873e-3 + y * (0.8449199096e-5 + y * (-0.88228987e-6 + y * (0.105787412e-6))));
             return Math.sqrt(0.636619772 / ax) * (Math.cos(xx) * ans1 - z * Math.sin(xx) * ans2);
         }
     }
 
-    /**
-     * Calculates RF attenuation based on a circular aperture radiation pattern.
-     */
-    function calculateAttenuation() {
-        // Read current config
+    function normalizeAz(angle) {
+        let a = angle % 360;
+        return a < 0 ? a + 360 : a;
+    }
+
+    function angularDist(a1, a2) {
+        let diff = (a1 - a2) % 360;
+        if (diff > 180) diff -= 360;
+        if (diff < -180) diff += 360;
+        return diff;
+    }
+
+    function calcPatternAtten(offAxisDeg) {
         const freqGhz = parseFloat(els.inFreq.value);
-        const diameterFt = parseFloat(els.inDiameter.value);
-        
-        const c = 3e8; // Speed of light m/s
-        const lambda = c / (freqGhz * 1e9);
-        const radiusM = (diameterFt * 0.3048) / 2; // Convert ft diameter to m radius
+        const radiusM = (parseFloat(els.inDiameter.value) * 0.3048) / 2;
+        const lambda = 3e8 / (freqGhz * 1e9);
         const k = (2 * Math.PI) / lambda;
-
-        // Angle offset: Diff between calibrated Yaw and Target Angle
-        let offAxisAngleDeg = Math.abs(state.calibrated.alpha - state.targetAngle);
         
-        // Handle 0-360 wraparound for shortest distance
-        if (offAxisAngleDeg > 180) offAxisAngleDeg = 360 - offAxisAngleDeg;
+        const thetaRad = Math.abs(offAxisDeg) * (Math.PI / 180);
+        if (thetaRad === 0) return 0.0;
         
-        const thetaRad = offAxisAngleDeg * (Math.PI / 180);
-
-        if (thetaRad === 0) return 0.0; // Perfect alignment
-
-        // Argument for Bessel function: x = ka * sin(theta)
         const x = k * radiusM * Math.sin(thetaRad);
-
-        if (x === 0) return 0.0; // Safety catch
-
-        // Pattern Gain factor: 2 * J1(x) / x
+        if (x === 0) return 0.0;
+        
         const gainFactor = (2 * j1(x)) / x;
-
-        // Prevent log10(0) issues in deep nulls
         if (Math.abs(gainFactor) < 1e-9) return -100.0;
-
-        // Convert gain factor to dB attenuation
-        let attenDb = 20 * Math.log10(Math.abs(gainFactor));
-        return attenDb; 
+        return 20 * Math.log10(Math.abs(gainFactor));
     }
 
-    // --- Initialization ---
-
-    function setRandomTarget() {
-        // Random angle between 85 and 95
-        state.targetAngle = (Math.random() * 10) + 85;
-        els.outTarget.textContent = state.targetAngle.toFixed(2);
+    function clearGraphHistory() {
+        historyAz = [];
+        historyEl = [];
+        updateChartDisplayMode();
     }
 
-    function checkHttps() {
-        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-            els.status.innerHTML = "<strong>🛑 Error: HTTPS Required</strong><br>Mobile sensors strictly require an HTTPS connection. This app will not work over HTTP.";
-            els.status.style.backgroundColor = "var(--danger)";
-            els.status.style.color = "white";
-            els.status.style.display = "block";
-            els.btnPermissions.disabled = true;
-            return false;
-        }
-        els.status.style.display = "none";
-        return true;
+    function setRandomTargets() {
+        state.targetAz = Math.random() * 10 + 85; 
+        state.targetEl = Math.random() * 10 + 85;
+        els.outTargetAz.textContent = state.targetAz.toFixed(1);
+        els.outTargetEl.textContent = state.targetEl.toFixed(1);
+        clearGraphHistory();
     }
 
-    // --- Main Update Loop ---
+    // --- Chart Logic ---
+    function initChart() {
+        const ctx = document.getElementById('rslChart').getContext('2d');
+        rslChart = new Chart(ctx, {
+            type: 'scatter', // Changed to scatter to plot raw points
+            data: {
+                datasets: [
+                    {
+                        label: 'History Trail',
+                        data: [], 
+                        backgroundColor: 'black',
+                        pointRadius: 2,
+                        pointHoverRadius: 4
+                    },
+                    {
+                        label: 'Current Position',
+                        data: [], 
+                        backgroundColor: '#dc3545', // Red
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        pointRadius: 8,
+                        pointHoverRadius: 10
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 }, 
+                scales: {
+                    x: { type: 'linear', title: { display: true, text: 'Angle (°)' } },
+                    y: { title: { display: true, text: 'RSL (dBm)' }, max: -25, min: -100 }
+                }
+            }
+        });
+    }
 
+    function updateChartDisplayMode() {
+        if (!rslChart) return;
+        const mode = els.graphMode.value;
+        
+        // Swap out the underlying dataset array and update axis label based on dropdown selection
+        rslChart.options.scales.x.title.text = mode === 'azimuth' ? 'Azimuth (°)' : 'Elevation (°)';
+        rslChart.data.datasets[0].data = mode === 'azimuth' ? historyAz : historyEl;
+        rslChart.update();
+    }
+
+    // --- Main Loop ---
     function updateDashboard() {
         if (!state.sensorsActive) return;
 
-        // 1. Calculate Calibrated Angles applying offsets
-        // Handle 0-360 wraparound for Alpha (Yaw)
-        let calAlpha = (state.raw.alpha + state.offsets.alpha) % 360;
-        if (calAlpha < 0) calAlpha += 360; // Normalize negative results
-        state.calibrated.alpha = calAlpha;
+        state.calibrated.az = normalizeAz(state.raw.az + state.offsets.az);
+        state.calibrated.el = state.raw.el + state.offsets.el;
 
-        state.calibrated.beta = state.raw.beta + state.offsets.beta;
-        state.calibrated.gamma = state.raw.gamma + state.offsets.gamma;
+        els.outYaw.textContent = state.calibrated.az.toFixed(1);
+        els.outPitch.textContent = state.calibrated.el.toFixed(1);
 
-        // 2. Update Angle UI
-        els.outYaw.textContent = state.calibrated.alpha.toFixed(2);
-        els.outPitch.textContent = state.calibrated.beta.toFixed(2);
+        let dAz = angularDist(state.calibrated.az, state.targetAz);
+        let dEl = state.calibrated.el - state.targetEl;
+        let theta2D = Math.sqrt(dAz*dAz + dEl*dEl); 
+        
+        state.currentAtten = calcPatternAtten(theta2D);
+        let rsl = BASE_RSL + state.currentAtten;
 
-        // 3. Run RF Math
-        const atten = calculateAttenuation();
-        const rsl = BASE_RSL + atten;
+        els.outRsl.textContent = rsl.toFixed(1);
+        els.outAtten.textContent = state.currentAtten.toFixed(1);
 
-        // 4. Update RF UI
-        els.outRsl.textContent = rsl.toFixed(2);
-        els.outAtten.textContent = atten.toFixed(2);
+        if (state.currentAtten > -3) els.outRsl.style.color = 'var(--success)';
+        else if (state.currentAtten > -12) els.outRsl.style.color = 'var(--warning)';
+        else els.outRsl.style.color = 'var(--danger)';
 
-        // Color coding RSL based on quality
-        if (atten > -3) { els.outRsl.style.color = 'var(--success)'; }
-        else if (atten > -12) { els.outRsl.style.color = 'var(--warning)'; }
-        else { els.outRsl.style.color = 'var(--danger)'; }
+        // Plot the points (throttled to 10 FPS)
+        let now = Date.now();
+        if (now - lastChartUpdate > 100 && rslChart) {
+            const mode = els.graphMode.value;
+            let currentX = mode === 'azimuth' ? state.calibrated.az : state.calibrated.el;
+            let currentY = Math.max(rsl, -100);
+
+            // Save to history arrays
+            historyAz.push({ x: state.calibrated.az, y: currentY });
+            historyEl.push({ x: state.calibrated.el, y: currentY });
+
+            // Enforce max history length
+            if (historyAz.length > MAX_HISTORY) historyAz.shift();
+            if (historyEl.length > MAX_HISTORY) historyEl.shift();
+
+            // Update the live red dot
+            rslChart.data.datasets[1].data = [{ x: currentX, y: currentY }];
+
+            rslChart.update();
+            lastChartUpdate = now;
+        }
     }
 
-    // --- Event Handlers & Sensor Access ---
-
-    // Handler for DeviceOrientation (Gyro)
     function handleOrientation(event) {
-        // Alpha is Compass heading (0=North), Beta is Pitch, Gamma is Roll
-        state.raw.alpha = event.alpha; 
-        state.raw.beta = event.beta;
-        state.raw.gamma = event.gamma;
-        
-        // This fires many times per second, update UI immediately
+        let isLandscape = window.innerWidth > window.innerHeight;
+        state.raw.az = event.alpha || 0;
+        state.raw.el = isLandscape ? (event.gamma || 0) : (event.beta || 0);
         updateDashboard();
     }
 
-    // Handler for Geolocation (GPS)
-    function handleLocation(position) {
-        const lat = position.coords.latitude.toFixed(5);
-        const lon = position.coords.longitude.toFixed(5);
-        const acc = position.coords.accuracy.toFixed(1);
-        els.outGps.textContent = `Lat: ${lat}, Lon: ${lon} (±${acc}m)`;
-    }
-
-    // "Start Sensors" Button (handles iOS permissions interaction)
-    // "Start Sensors" Button with explicit Error Catching
+    // --- Controls ---
     els.btnPermissions.addEventListener('click', () => {
         try {
-            // Check if the DeviceOrientationEvent exists and requires permission (iOS/iPadOS)
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(response => {
-                        if (response === 'granted') {
-                            startSensors();
-                        } else {
-                            alert("Permission to access the gyroscope was denied.");
-                        }
-                    })
-                    .catch(err => {
-                        alert("Permission request failed: " + err.message);
-                    });
-            } else {
-                // Standard browser fallback
-                startSensors();
-            }
-        } catch (error) {
-            // Catch any silent crashes
-            alert("System Error: " + error.message);
-        }
+                DeviceOrientationEvent.requestPermission().then(response => {
+                    if (response === 'granted') startSensors();
+                    else alert("Gyro permission denied.");
+                }).catch(err => alert("Error: " + err.message));
+            } else { startSensors(); }
+        } catch (e) { alert("System Error: " + e.message); }
     });
-
 
     function startSensors() {
         state.sensorsActive = true;
-        setRandomTarget();
-        
-        // Listen to Gyro
+        setRandomTargets();
+        initChart();
+        updateChartDisplayMode();
         window.addEventListener('deviceorientation', handleOrientation, true);
-        
-        // Listen to GPS (watchPosition for real-time updates)
-        if ("geolocation" in navigator) {
-            navigator.geolocation.watchPosition(handleLocation, (err) => {
-                els.outGps.textContent = `GPS Error: ${err.message}`;
-            });
-        } else {
-            els.outGps.textContent = "GPS Not Supported by browser.";
-        }
-
-        // Transition UI
         els.btnPermissions.style.display = 'none';
         els.btnRandomizeTarget.style.display = 'block';
         els.dashboard.style.display = 'grid';
     }
 
-    // Zero Button logic
+    els.btnStop.addEventListener('click', () => {
+        state.sensorsActive = false;
+        window.removeEventListener('deviceorientation', handleOrientation, true);
+        els.btnPermissions.style.display = 'block';
+        els.btnPermissions.textContent = "Resume Sensors";
+        els.btnRandomizeTarget.style.display = 'none';
+    });
+
     els.btnZero.addEventListener('click', () => {
-        // User wants current raw reading to equal 90 degrees calibrated
-        state.offsets.alpha = 90.0 - state.raw.alpha;
-        state.offsets.beta = 90.0 - state.raw.beta;
-        state.offsets.gamma = 90.0 - state.raw.gamma;
-        
-        // Give immediate visual feedback that target is now relative to the 90 offset
+        state.offsets.az = normalizeAz(90.0 - state.raw.az);
+        state.offsets.el = 90.0 - state.raw.el;
+        clearGraphHistory();
         updateDashboard();
     });
 
-    els.btnRandomizeTarget.addEventListener('click', setRandomTarget);
-
-    // --- Start ---
-    checkHttps();
+    els.btnRandomizeTarget.addEventListener('click', setRandomTargets);
+    els.graphMode.addEventListener('change', updateChartDisplayMode);
 
 </script>
-
 </body>
 </html>
