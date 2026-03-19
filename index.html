@@ -283,13 +283,13 @@
         updateChartDisplayMode();
     }
 
-    function setRandomTargets() {
+    // FIX: Added a parameter to control whether sensors automatically restart
+    function setRandomTargets(restartTracking = false) {
         state.targetAz = Math.random() * 10 + 85; 
         state.targetEl = Math.random() * 10 + 85;
         els.outTargetAz.textContent = state.targetAz.toFixed(2);
         els.outTargetEl.textContent = state.targetEl.toFixed(2);
         
-        // Reset UI for a new alignment run
         els.targetContainer.classList.remove('reveal-target');
         els.targetContainer.classList.add('blur-target');
         els.resultsCard.style.display = 'none';
@@ -298,7 +298,11 @@
 
         resetMaxHold();
         clearGraphHistory();
-        startSensors(); // Automatically start tracking again
+        
+        // Only start sensors if explicitly requested by the button click
+        if (restartTracking) {
+            startSensors(); 
+        }
     }
 
     // --- GPS Logic ---
@@ -423,11 +427,11 @@
         state.sensorsActive = true;
         
         if (state.isFirstStart) {
-            setRandomTargets();
+            state.isFirstStart = false; // FIX: Flag must be toggled before setRandomTargets to prevent the infinite loop!
+            setRandomTargets(false); 
             initChart();
             updateChartDisplayMode();
             startGps();
-            state.isFirstStart = false;
         }
 
         window.addEventListener('deviceorientation', handleOrientation, true);
@@ -449,26 +453,24 @@
         updateDashboard();
     });
 
-    els.btnRandomizeTarget.addEventListener('click', setRandomTargets);
+    // FIX: Pass 'true' to explicitly restart the sweep when clicking the button
+    els.btnRandomizeTarget.addEventListener('click', () => { setRandomTargets(true); });
+
     els.graphMode.addEventListener('change', updateChartDisplayMode);
     els.btnClearGraph.addEventListener('click', clearGraphHistory); 
 
     // --- Finish Alignment Sequence ---
     els.btnFinish.addEventListener('click', () => {
-        // 1. Freeze the sensors
         state.sensorsActive = false;
         window.removeEventListener('deviceorientation', handleOrientation, true);
         
-        // 2. Reveal the targets
         els.targetContainer.classList.remove('blur-target');
         els.targetContainer.classList.add('reveal-target');
 
-        // 3. Calculate 2D Error Spatial distance
         let dAz = angularDist(state.calibrated.az, state.targetAz);
         let dEl = angularDist(state.calibrated.el, state.targetEl);
         let error = Math.sqrt(dAz*dAz + dEl*dEl);
 
-        // 4. Update UI with color coding
         els.resultsCard.style.display = 'block';
         els.outError.textContent = error.toFixed(2) + "°";
         
@@ -486,7 +488,6 @@
             els.outResultMessage.style.color = 'var(--danger)';
         }
 
-        // Disable finish button until new targets are set
         els.btnFinish.disabled = true;
         els.btnFinish.style.opacity = '0.5';
     });
@@ -494,4 +495,3 @@
 </script>
 </body>
 </html>
-
