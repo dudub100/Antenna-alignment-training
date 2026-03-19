@@ -26,12 +26,13 @@
         label { display: block; margin-bottom: 4px; font-weight: bold; font-size: 0.9rem;}
         input[type="number"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
         
-        button { width: 100%; padding: 12px; border: none; border-radius: 5px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white;}
+        button { width: 100%; padding: 12px; border: none; border-radius: 5px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-bottom: 10px; color: white; transition: 0.2s;}
         button.primary { background-color: var(--primary); }
         button.success { background-color: var(--success); }
         button.dark { background-color: #333; }
         button.danger { background-color: var(--danger); }
-        button:active { opacity: 0.8; }
+        button.info { background-color: #17a2b8; }
+        button:active { opacity: 0.8; transform: scale(0.98); }
 
         .dashboard { display: none; grid-template-columns: 1fr 1fr; gap: 15px; }
         .metric-card { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
@@ -41,10 +42,28 @@
         .rsl-card { grid-column: 1 / -1; background-color: #333; color: white; }
         .rsl-card h3 { color: #aaa; }
         .rsl-value { font-size: 3rem; color: var(--success); }
+
+        .max-hold-card { background-color: #e9ecef; border: 2px solid #ced4da; }
+        .gps-text { font-size: 1rem; font-family: monospace; color: var(--primary); }
         
         .full-width { grid-column: 1 / -1; }
         .btn-group { display: flex; gap: 10px; }
         
+        /* Blur Effect for Targets */
+        .blur-target { 
+            filter: blur(6px); 
+            opacity: 0.7;
+            transition: filter 0.5s ease, opacity 0.5s ease; 
+        }
+        .reveal-target { 
+            filter: blur(0px); 
+            opacity: 1;
+        }
+
+        /* Results Modal/Card */
+        #resultsCard { display: none; border: 3px solid var(--primary); }
+        .error-value { font-size: 2.5rem; font-weight: bold; }
+
         .chart-container { position: relative; height: 30vh; width: 100%; margin-top: 15px;}
     </style>
 </head>
@@ -63,20 +82,34 @@
             <input type="number" id="inDiameter" value="4.0" step="0.5" min="0.5">
         </div>
         <button class="success" id="btnPermissions">Start Sensors</button>
-        <button class="primary" id="btnRandomizeTarget" style="display:none;">Set New Targets (Az & El)</button>
+        <button class="primary" id="btnRandomizeTarget" style="display:none;">Set New Targets (Restarts Sweep)</button>
     </div>
 
     <div class="dashboard" id="mainDashboard">
+
+        <div class="metric-card full-width">
+            <h3>📍 Device GPS Location</h3>
+            <div class="gps-text" id="outGps">Locating satellites...</div>
+        </div>
         
         <div class="metric-card rsl-card">
-            <h3>Emulated RSL</h3>
+            <h3>Live RSL</h3>
             <div class="rsl-value"><span id="outRsl">--</span> dBm</div>
             <div>Attenuation: <span id="outAtten">--</span> dB</div>
         </div>
 
+        <div class="metric-card full-width max-hold-card">
+            <h3>⭐ Peak Signal (Max Hold)</h3>
+            <div style="display: flex; justify-content: space-around; font-size: 1.2rem;">
+                <div><strong>RSL:</strong> <span id="outMaxRsl" style="color:var(--success);">--</span></div>
+                <div><strong>Az:</strong> <span id="outMaxAz">--</span>°</div>
+                <div><strong>El:</strong> <span id="outMaxEl">--</span>°</div>
+            </div>
+        </div>
+
         <div class="metric-card full-width">
-            <h3>Targets</h3>
-            <div class="metric-value" style="color: var(--primary);">
+            <h3>Secret Optimal Targets</h3>
+            <div class="metric-value blur-target" id="targetContainer" style="color: var(--primary);">
                 Azimuth: <span id="outTargetAz">--</span>° | Elev: <span id="outTargetEl">--</span>°
             </div>
         </div>
@@ -92,7 +125,18 @@
 
         <div class="full-width btn-group">
             <button class="dark" id="btnZero">🎯 ZERO GYRO</button>
-            <button class="danger" id="btnStop">⏹ STOP</button>
+            <button class="danger" id="btnStop">⏹ PAUSE</button>
+        </div>
+
+        <div class="full-width">
+            <button class="info" id="btnFinish" style="font-size: 1.2rem; padding: 15px;">🏁 FINISH ALIGNMENT</button>
+        </div>
+
+        <div class="metric-card full-width" id="resultsCard">
+            <h3>Alignment Report</h3>
+            <p>Spatial Error (Distance from Target):</p>
+            <div class="error-value" id="outError">--°</div>
+            <p id="outResultMessage" style="font-weight: bold; margin-top: 5px;"></p>
         </div>
 
         <div class="panel full-width">
@@ -116,6 +160,7 @@
     const BASE_RSL = -30.0; 
     let rslChart = null;
     let lastChartUpdate = 0;
+    let gpsWatchId = null;
 
     let historyAz = [];
     let historyEl = [];
@@ -129,25 +174,38 @@
         raw: { az: 0, el: 0 },
         offsets: { az: 0, el: 0 },
         calibrated: { az: 0, el: 0 },
-        currentAtten: 0
+        currentAtten: 0,
+        // Max Hold State
+        maxRsl: -1000,
+        maxAz: 0,
+        maxEl: 0
     };
 
     const els = {
-        inFreq: document.getElementById('inFreq'),
-        inDiameter: document.getElementById('inDiameter'),
         btnPermissions: document.getElementById('btnPermissions'),
         btnRandomizeTarget: document.getElementById('btnRandomizeTarget'),
         btnZero: document.getElementById('btnZero'),
         btnStop: document.getElementById('btnStop'),
+        btnFinish: document.getElementById('btnFinish'),
         btnClearGraph: document.getElementById('btnClearGraph'),
         dashboard: document.getElementById('mainDashboard'),
         outRsl: document.getElementById('outRsl'),
         outAtten: document.getElementById('outAtten'),
         outTargetAz: document.getElementById('outTargetAz'),
         outTargetEl: document.getElementById('outTargetEl'),
+        targetContainer: document.getElementById('targetContainer'),
         outYaw: document.getElementById('outYaw'),
         outPitch: document.getElementById('outPitch'),
-        graphMode: document.getElementById('graphMode')
+        outMaxRsl: document.getElementById('outMaxRsl'),
+        outMaxAz: document.getElementById('outMaxAz'),
+        outMaxEl: document.getElementById('outMaxEl'),
+        outGps: document.getElementById('outGps'),
+        resultsCard: document.getElementById('resultsCard'),
+        outError: document.getElementById('outError'),
+        outResultMessage: document.getElementById('outResultMessage'),
+        graphMode: document.getElementById('graphMode'),
+        inFreq: document.getElementById('inFreq'),
+        inDiameter: document.getElementById('inDiameter')
     };
 
     // --- Math & Vector Functions ---
@@ -195,29 +253,28 @@
         return 20 * Math.log10(Math.abs(gainFactor));
     }
 
-    // NEW: Converts erratic Euler angles into stable 3D vectors
     function getStableAngles(alpha, beta, gamma) {
         const d2r = Math.PI / 180;
         const r2d = 180 / Math.PI;
+        const a = (alpha || 0) * d2r, b = (beta || 0) * d2r, g = (gamma || 0) * d2r;
+        const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b), cg = Math.cos(g), sg = Math.sin(g);
 
-        const a = (alpha || 0) * d2r;
-        const b = (beta || 0) * d2r;
-        const g = (gamma || 0) * d2r;
+        const vx = -(ca * sg + sa * sb * cg); 
+        const vy = -(sa * sg - ca * sb * cg); 
+        const vz = -(cb * cg);                
 
-        const ca = Math.cos(a), sa = Math.sin(a);
-        const cb = Math.cos(b), sb = Math.sin(b);
-        const cg = Math.cos(g), sg = Math.sin(g);
-
-        // Project the device's back camera into Earth's 3D coordinate space
-        const vx = -(ca * sg + sa * sb * cg); // East/West
-        const vy = -(sa * sg - ca * sb * cg); // North/South
-        const vz = -(cb * cg);                // Up/Down
-
-        // Extract stable Azimuth and Elevation from the 3D vector
         let el = Math.asin(Math.max(-1, Math.min(1, vz))) * r2d;
         let az = Math.atan2(vx, vy) * r2d;
 
         return { az: (az + 360) % 360, el: el };
+    }
+
+    // --- State Management ---
+    function resetMaxHold() {
+        state.maxRsl = -1000;
+        els.outMaxRsl.textContent = "--";
+        els.outMaxAz.textContent = "--";
+        els.outMaxEl.textContent = "--";
     }
 
     function clearGraphHistory() {
@@ -229,54 +286,54 @@
     function setRandomTargets() {
         state.targetAz = Math.random() * 10 + 85; 
         state.targetEl = Math.random() * 10 + 85;
-        els.outTargetAz.textContent = state.targetAz.toFixed(1);
-        els.outTargetEl.textContent = state.targetEl.toFixed(1);
+        els.outTargetAz.textContent = state.targetAz.toFixed(2);
+        els.outTargetEl.textContent = state.targetEl.toFixed(2);
+        
+        // Reset UI for a new alignment run
+        els.targetContainer.classList.remove('reveal-target');
+        els.targetContainer.classList.add('blur-target');
+        els.resultsCard.style.display = 'none';
+        els.btnFinish.disabled = false;
+        els.btnFinish.style.opacity = '1';
+
+        resetMaxHold();
         clearGraphHistory();
+        startSensors(); // Automatically start tracking again
+    }
+
+    // --- GPS Logic ---
+    function startGps() {
+        if ("geolocation" in navigator) {
+            gpsWatchId = navigator.geolocation.watchPosition((position) => {
+                const lat = position.coords.latitude.toFixed(5);
+                const lon = position.coords.longitude.toFixed(5);
+                const alt = position.coords.altitude ? position.coords.altitude.toFixed(1) + 'm' : 'N/A';
+                els.outGps.textContent = `Lat: ${lat}, Lon: ${lon} | Alt: ${alt}`;
+            }, (err) => {
+                els.outGps.textContent = `GPS Error: ${err.message}`;
+            }, { enableHighAccuracy: true });
+        } else {
+            els.outGps.textContent = "GPS not supported on this browser.";
+        }
     }
 
     // --- Chart Logic ---
     function initChart() {
         if (rslChart) rslChart.destroy();
-
         const ctx = document.getElementById('rslChart').getContext('2d');
         rslChart = new Chart(ctx, {
             type: 'scatter', 
             data: {
                 datasets: [
-                    {
-                        label: 'History Trail',
-                        data: [], 
-                        backgroundColor: 'black',
-                        pointRadius: 2,
-                        pointHoverRadius: 4
-                    },
-                    {
-                        label: 'Current Position',
-                        data: [], 
-                        backgroundColor: '#dc3545',
-                        borderColor: 'white',
-                        borderWidth: 2,
-                        pointRadius: 8,
-                        pointHoverRadius: 10
-                    }
+                    { label: 'History Trail', data: [], backgroundColor: 'black', pointRadius: 2 },
+                    { label: 'Current Position', data: [], backgroundColor: '#dc3545', borderColor: 'white', borderWidth: 2, pointRadius: 8 }
                 ]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 0 }, 
+                responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, 
                 scales: {
-                    x: { 
-                        type: 'linear', 
-                        title: { display: true, text: 'Angle (°)' },
-                        min: 80,  // Locked Minimum
-                        max: 100  // Locked Maximum
-                    },
-                    y: { 
-                        title: { display: true, text: 'RSL (dBm)' }, 
-                        max: -25, 
-                        min: -100 
-                    }
+                    x: { type: 'linear', title: { display: true, text: 'Angle (°)' }, min: 80, max: 100 },
+                    y: { title: { display: true, text: 'RSL (dBm)' }, max: -25, min: -100 }
                 }
             }
         });
@@ -297,8 +354,8 @@
         state.calibrated.az = normalizeAz(state.raw.az + state.offsets.az);
         state.calibrated.el = normalizeAz(state.raw.el + state.offsets.el);
 
-        els.outYaw.textContent = state.calibrated.az.toFixed(1);
-        els.outPitch.textContent = state.calibrated.el.toFixed(1);
+        els.outYaw.textContent = state.calibrated.az.toFixed(2);
+        els.outPitch.textContent = state.calibrated.el.toFixed(2);
 
         let dAz = angularDist(state.calibrated.az, state.targetAz);
         let dEl = angularDist(state.calibrated.el, state.targetEl);
@@ -307,12 +364,22 @@
         state.currentAtten = calcPatternAtten(theta2D);
         let rsl = BASE_RSL + state.currentAtten;
 
-        els.outRsl.textContent = rsl.toFixed(1);
-        els.outAtten.textContent = state.currentAtten.toFixed(1);
+        els.outRsl.textContent = rsl.toFixed(2);
+        els.outAtten.textContent = state.currentAtten.toFixed(2);
 
         if (state.currentAtten > -3) els.outRsl.style.color = 'var(--success)';
         else if (state.currentAtten > -12) els.outRsl.style.color = 'var(--warning)';
         else els.outRsl.style.color = 'var(--danger)';
+
+        // UPDATE MAX HOLD
+        if (rsl > state.maxRsl) {
+            state.maxRsl = rsl;
+            state.maxAz = state.calibrated.az;
+            state.maxEl = state.calibrated.el;
+            els.outMaxRsl.textContent = rsl.toFixed(2) + " dBm";
+            els.outMaxAz.textContent = state.maxAz.toFixed(2);
+            els.outMaxEl.textContent = state.maxEl.toFixed(2);
+        }
 
         let now = Date.now();
         if (now - lastChartUpdate > 100 && rslChart) {
@@ -320,11 +387,9 @@
             let currentX = mode === 'azimuth' ? state.calibrated.az : state.calibrated.el;
             let currentY = Math.max(rsl, -100);
 
-            // Only plot points that fall within the 80 to 100 chart boundaries
             if (currentX >= 80 && currentX <= 100) {
                 historyAz.push({ x: state.calibrated.az, y: currentY });
                 historyEl.push({ x: state.calibrated.el, y: currentY });
-
                 if (historyAz.length > MAX_HISTORY) historyAz.shift();
                 if (historyEl.length > MAX_HISTORY) historyEl.shift();
             }
@@ -336,7 +401,6 @@
     }
 
     function handleOrientation(event) {
-        // Feed raw, erratic data into the vector stabilizer
         const stable = getStableAngles(event.alpha, event.beta, event.gamma);
         state.raw.az = stable.az;
         state.raw.el = stable.el;
@@ -362,6 +426,7 @@
             setRandomTargets();
             initChart();
             updateChartDisplayMode();
+            startGps();
             state.isFirstStart = false;
         }
 
@@ -374,14 +439,12 @@
     els.btnStop.addEventListener('click', () => {
         state.sensorsActive = false;
         window.removeEventListener('deviceorientation', handleOrientation, true);
-        els.btnPermissions.style.display = 'block';
-        els.btnPermissions.textContent = "Resume Sensors";
-        els.btnRandomizeTarget.style.display = 'none';
     });
 
     els.btnZero.addEventListener('click', () => {
         state.offsets.az = normalizeAz(90.0 - state.raw.az);
         state.offsets.el = normalizeAz(90.0 - state.raw.el);
+        resetMaxHold();
         clearGraphHistory();
         updateDashboard();
     });
@@ -390,6 +453,45 @@
     els.graphMode.addEventListener('change', updateChartDisplayMode);
     els.btnClearGraph.addEventListener('click', clearGraphHistory); 
 
+    // --- Finish Alignment Sequence ---
+    els.btnFinish.addEventListener('click', () => {
+        // 1. Freeze the sensors
+        state.sensorsActive = false;
+        window.removeEventListener('deviceorientation', handleOrientation, true);
+        
+        // 2. Reveal the targets
+        els.targetContainer.classList.remove('blur-target');
+        els.targetContainer.classList.add('reveal-target');
+
+        // 3. Calculate 2D Error Spatial distance
+        let dAz = angularDist(state.calibrated.az, state.targetAz);
+        let dEl = angularDist(state.calibrated.el, state.targetEl);
+        let error = Math.sqrt(dAz*dAz + dEl*dEl);
+
+        // 4. Update UI with color coding
+        els.resultsCard.style.display = 'block';
+        els.outError.textContent = error.toFixed(2) + "°";
+        
+        if (error <= 0.1) {
+            els.outError.style.color = 'var(--success)';
+            els.outResultMessage.textContent = "Perfect alignment! Spot on.";
+            els.outResultMessage.style.color = 'var(--success)';
+        } else if (error <= 0.3) {
+            els.outError.style.color = 'var(--warning)';
+            els.outResultMessage.textContent = "Good alignment, within acceptable margins.";
+            els.outResultMessage.style.color = 'var(--warning)';
+        } else {
+            els.outError.style.color = 'var(--danger)';
+            els.outResultMessage.textContent = "Misaligned. You missed the main lobe peak.";
+            els.outResultMessage.style.color = 'var(--danger)';
+        }
+
+        // Disable finish button until new targets are set
+        els.btnFinish.disabled = true;
+        els.btnFinish.style.opacity = '0.5';
+    });
+
 </script>
 </body>
 </html>
+
