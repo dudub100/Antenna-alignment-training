@@ -103,6 +103,7 @@
                     <option value="elevation">RSL vs Elevation</option>
                 </select>
             </div>
+            <button class="dark" id="btnClearGraph" style="margin-bottom: 0;">🗑 Clear Graph Points</button>
             <div class="chart-container">
                 <canvas id="rslChart"></canvas>
             </div>
@@ -116,13 +117,13 @@
     let rslChart = null;
     let lastChartUpdate = 0;
 
-    // History arrays for the sweep trace
     let historyAz = [];
     let historyEl = [];
-    const MAX_HISTORY = 200; // Limit points to prevent iPad lag
+    const MAX_HISTORY = 200; 
 
     let state = {
         sensorsActive: false,
+        isFirstStart: true,
         targetAz: 0,
         targetEl: 0,
         raw: { az: 0, el: 0 },
@@ -138,6 +139,7 @@
         btnRandomizeTarget: document.getElementById('btnRandomizeTarget'),
         btnZero: document.getElementById('btnZero'),
         btnStop: document.getElementById('btnStop'),
+        btnClearGraph: document.getElementById('btnClearGraph'),
         dashboard: document.getElementById('mainDashboard'),
         outRsl: document.getElementById('outRsl'),
         outAtten: document.getElementById('outAtten'),
@@ -209,9 +211,13 @@
 
     // --- Chart Logic ---
     function initChart() {
+        if (rslChart) {
+            rslChart.destroy();
+        }
+
         const ctx = document.getElementById('rslChart').getContext('2d');
         rslChart = new Chart(ctx, {
-            type: 'scatter', // Changed to scatter to plot raw points
+            type: 'scatter', 
             data: {
                 datasets: [
                     {
@@ -224,7 +230,7 @@
                     {
                         label: 'Current Position',
                         data: [], 
-                        backgroundColor: '#dc3545', // Red
+                        backgroundColor: '#dc3545',
                         borderColor: 'white',
                         borderWidth: 2,
                         pointRadius: 8,
@@ -237,8 +243,17 @@
                 maintainAspectRatio: false,
                 animation: { duration: 0 }, 
                 scales: {
-                    x: { type: 'linear', title: { display: true, text: 'Angle (°)' } },
-                    y: { title: { display: true, text: 'RSL (dBm)' }, max: -25, min: -100 }
+                    x: { 
+                        type: 'linear', 
+                        title: { display: true, text: 'Angle (°)' },
+                        min: 80,  // FIX: Hardcoded minimum bound
+                        max: 100  // FIX: Hardcoded maximum bound
+                    },
+                    y: { 
+                        title: { display: true, text: 'RSL (dBm)' }, 
+                        max: -25, 
+                        min: -100 
+                    }
                 }
             }
         });
@@ -247,8 +262,6 @@
     function updateChartDisplayMode() {
         if (!rslChart) return;
         const mode = els.graphMode.value;
-        
-        // Swap out the underlying dataset array and update axis label based on dropdown selection
         rslChart.options.scales.x.title.text = mode === 'azimuth' ? 'Azimuth (°)' : 'Elevation (°)';
         rslChart.data.datasets[0].data = mode === 'azimuth' ? historyAz : historyEl;
         rslChart.update();
@@ -258,14 +271,16 @@
     function updateDashboard() {
         if (!state.sensorsActive) return;
 
+        // FIX: Ensure Elevation is smoothly wrapped between 0-360 just like Azimuth
         state.calibrated.az = normalizeAz(state.raw.az + state.offsets.az);
-        state.calibrated.el = state.raw.el + state.offsets.el;
+        state.calibrated.el = normalizeAz(state.raw.el + state.offsets.el);
 
         els.outYaw.textContent = state.calibrated.az.toFixed(1);
         els.outPitch.textContent = state.calibrated.el.toFixed(1);
 
+        // FIX: Safely calculate the shortest distance for Elevation without breaking limits
         let dAz = angularDist(state.calibrated.az, state.targetAz);
-        let dEl = state.calibrated.el - state.targetEl;
+        let dEl = angularDist(state.calibrated.el, state.targetEl);
         let theta2D = Math.sqrt(dAz*dAz + dEl*dEl); 
         
         state.currentAtten = calcPatternAtten(theta2D);
@@ -278,24 +293,19 @@
         else if (state.currentAtten > -12) els.outRsl.style.color = 'var(--warning)';
         else els.outRsl.style.color = 'var(--danger)';
 
-        // Plot the points (throttled to 10 FPS)
         let now = Date.now();
         if (now - lastChartUpdate > 100 && rslChart) {
             const mode = els.graphMode.value;
             let currentX = mode === 'azimuth' ? state.calibrated.az : state.calibrated.el;
             let currentY = Math.max(rsl, -100);
 
-            // Save to history arrays
             historyAz.push({ x: state.calibrated.az, y: currentY });
             historyEl.push({ x: state.calibrated.el, y: currentY });
 
-            // Enforce max history length
             if (historyAz.length > MAX_HISTORY) historyAz.shift();
             if (historyEl.length > MAX_HISTORY) historyEl.shift();
 
-            // Update the live red dot
             rslChart.data.datasets[1].data = [{ x: currentX, y: currentY }];
-
             rslChart.update();
             lastChartUpdate = now;
         }
@@ -322,9 +332,14 @@
 
     function startSensors() {
         state.sensorsActive = true;
-        setRandomTargets();
-        initChart();
-        updateChartDisplayMode();
+        
+        if (state.isFirstStart) {
+            setRandomTargets();
+            initChart();
+            updateChartDisplayMode();
+            state.isFirstStart = false;
+        }
+
         window.addEventListener('deviceorientation', handleOrientation, true);
         els.btnPermissions.style.display = 'none';
         els.btnRandomizeTarget.style.display = 'block';
@@ -340,14 +355,16 @@
     });
 
     els.btnZero.addEventListener('click', () => {
+        // FIX: Apply the same normalization to the elevation offset
         state.offsets.az = normalizeAz(90.0 - state.raw.az);
-        state.offsets.el = 90.0 - state.raw.el;
+        state.offsets.el = normalizeAz(90.0 - state.raw.el);
         clearGraphHistory();
         updateDashboard();
     });
 
     els.btnRandomizeTarget.addEventListener('click', setRandomTargets);
     els.graphMode.addEventListener('change', updateChartDisplayMode);
+    els.btnClearGraph.addEventListener('click', clearGraphHistory); 
 
 </script>
 </body>
