@@ -343,23 +343,32 @@
     }
 
     // "Start Sensors" Button (handles iOS permissions interaction)
+    // "Start Sensors" Button with explicit Error Catching
     els.btnPermissions.addEventListener('click', () => {
-        // Check for iOS-specific permission requirement
-        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-            DeviceOrientationEvent.requestPermission()
-                .then(response => {
-                    if (response == 'granted') {
-                        startSensors();
-                    } else {
-                        alert("Permission denied. The gyro is required for emulation.");
-                    }
-                })
-                .catch(console.error);
-        } else {
-            // Standard browser / Android, no requestPermission needed
-            startSensors();
+        try {
+            // Check if the DeviceOrientationEvent exists and requires permission (iOS/iPadOS)
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            startSensors();
+                        } else {
+                            alert("Permission to access the gyroscope was denied.");
+                        }
+                    })
+                    .catch(err => {
+                        alert("Permission request failed: " + err.message);
+                    });
+            } else {
+                // Standard browser fallback
+                startSensors();
+            }
+        } catch (error) {
+            // Catch any silent crashes
+            alert("System Error: " + error.message);
         }
     });
+
 
     function startSensors() {
         state.sensorsActive = true;
