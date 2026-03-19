@@ -279,7 +279,7 @@
     function checkHttps() {
         if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
             els.status.innerHTML = "<strong>🛑 Error: HTTPS Required</strong><br>Mobile sensors strictly require an HTTPS connection. This app will not work over HTTP.";
-            els.status.style.backgroundColor = var(--danger);
+            els.status.style.backgroundColor = "var(--danger)";
             els.status.style.color = "white";
             els.status.style.display = "block";
             els.btnPermissions.disabled = true;
